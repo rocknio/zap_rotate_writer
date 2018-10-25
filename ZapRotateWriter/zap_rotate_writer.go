@@ -102,7 +102,7 @@ func getLogWriter(filePath string) (*os.File, *bufio.Writer, error) {
 // when: 目前支持“MIDNIGHT”，每天0点切换日志
 // rotateSize: 日志文件大小，单位M
 // logFileName: 日志文件名
-// maxFileNumber: 每天日志最多保存的文件个数，包括当前正在写的日志文件，最多1000各，序号从000 -- 999
+// maxFileNumber: 每天日志最多保存的文件个数，包括当前正在写的日志文件，最多1000个，序号从000 -- 999
 func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, logFileName string, maxFileNumberPerDay int) error {
 	if when != "MIDNIGHT" {
 		return errors.New("currently only supports 'MIDNIGHT'")
