@@ -1,7 +1,20 @@
 # zap_rotate_writer
 基于uber的zap日志模块，支持每天0点，以及按文件大小切分日志的模块。
 
-  zapRotateSync := &ZapRotateWriter.RotateLogWriteSyncer{}
+```go
+package main
+
+import (
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"os"
+	"strconv"
+	"time"
+	"zap_rotate_writer/ZapRotateWriter"
+)
+
+func main() {
+	ZapRotateSync := &ZapRotateWriter.RotateLogWriteSyncer{}
 	ZapRotateSync.RotateLoggerInit("MIDNIGHT", 0, "try.log", 3)
 	zapcore.Lock(ZapRotateSync)
 
@@ -20,4 +33,7 @@
 	}
 
 	Logger.Info("*************************************************** Done ***************************************************")
-  
+}
+
+```
+ 
