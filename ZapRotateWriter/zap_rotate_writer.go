@@ -73,7 +73,7 @@ func getCurrentLogNumber(dir, filename string) (fileSize int64, maxNumber int) {
 	return
 }
 
-// 获取当天23:59:59的unix时间值
+// 获取明天0点0分0秒的unix时间值
 func getNextRotateTime() int64 {
 	timeStr := time.Now().Format("2006-01-02")
 	t, _ := time.ParseInLocation("2006-01-02 15:04:05", timeStr+" 23:59:59", time.Local)
@@ -163,7 +163,7 @@ func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, 
 
 func (rw *RotateLogWriteSyncer) isNeedRotate(strLen int64) bool {
 	// 时间判断
-	if time.Now().Unix() > rw.nextRotateTime {
+	if time.Now().Unix() >= rw.nextRotateTime {
 		rw.nextRotateTime = getNextRotateTime()
 		return true
 	}
