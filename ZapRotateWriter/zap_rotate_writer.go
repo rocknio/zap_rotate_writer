@@ -17,15 +17,15 @@ import (
 // 支持按每天，文件大小切换日志的writersyncer
 // 需要使用zapcore.Lock，将RotateLogWriteSyncer加锁，支持协程安全
 type RotateLogWriteSyncer struct {
-	when string
-	rotateSize int64
-	currentFileNo int
-	maxFileNo int
+	when            string
+	rotateSize      int64
+	currentFileNo   int
+	maxFileNo       int
 	currentFileSize int64
-	filePath string
-	logWriter *bufio.Writer
-	logFile *os.File
-	nextRotateTime int64
+	filePath        string
+	logWriter       *bufio.Writer
+	logFile         *os.File
+	nextRotateTime  int64
 }
 
 func parsePath(path string) (absPath, dir, base string, err error) {
@@ -73,9 +73,10 @@ func getCurrentLogNumber(dir, filename string) (fileSize int64, maxNumber int) {
 	return
 }
 
+// 获取当天23:59:59的unix时间值
 func getNextRotateTime() int64 {
 	timeStr := time.Now().Format("2006-01-02")
-	t, _ := time.ParseInLocation("2006-01-02 15:04:05", timeStr + " 23:59:59", time.Local)
+	t, _ := time.ParseInLocation("2006-01-02 15:04:05", timeStr+" 23:59:59", time.Local)
 	return t.Unix() + 1
 }
 
@@ -101,8 +102,8 @@ func getLogWriter(filePath string) (*os.File, *bufio.Writer, error) {
 // when: 目前支持“MIDNIGHT”，每天0点切换日志
 // rotateSize: 日志文件大小，单位M
 // logFileName: 日志文件名
-// maxFileNumber: 日志最多保存的文件个数，最多1000各，序号从000 -- 999
-func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, logFileName string, maxFileNumber int) error {
+// maxFileNumber: 每天日志最多保存的文件个数，包括当前正在写的日志文件，最多1000各，序号从000 -- 999
+func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, logFileName string, maxFileNumberPerDay int) error {
 	if when != "MIDNIGHT" {
 		return errors.New("currently only supports 'MIDNIGHT'")
 	}
@@ -123,6 +124,27 @@ func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, 
 	rw.currentFileSize, rw.currentFileNo = getCurrentLogNumber(dirPath, fileName)
 	rw.currentFileNo++
 
+	// 计算下一次日志切换时间
+	rw.nextRotateTime = getNextRotateTime()
+
+	// 日志大小限制
+	if rotateSize <= 0 {
+		// 不限制大小
+		rw.rotateSize = 0xFFFFFFFF
+	} else {
+		rw.rotateSize = rotateSize * 1024 * 1024
+	}
+
+	// 保留的日志文件个数
+	if (maxFileNumberPerDay <= 0) || (maxFileNumberPerDay > 1000) {
+		rw.maxFileNo = 1000
+	} else {
+		rw.maxFileNo = maxFileNumberPerDay
+	}
+
+	// 做一次日志切换，避免生成tmp文件后，程序异常退出，存在tmp文件的情况
+	doLogRotate(rw.filePath, rw.maxFileNo, time.Now().Format("2006-01-02"))
+
 	// 如果filesize为0，表示还没有日志，新创建，否则打开原有文件
 	if rw.currentFileSize == 0 {
 		rw.logFile, rw.logWriter, err = createLogWriter(rw.filePath)
@@ -136,26 +158,12 @@ func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, 
 		}
 	}
 
-	// 计算下一次日志切换时间
-	rw.nextRotateTime = getNextRotateTime()
-
-	// 日志大小限制
-	if rotateSize == 0 {
-		// 不限制大小
-		rw.rotateSize = 0xFFFFFFFF
-	} else {
-		rw.rotateSize = rotateSize * 1024 * 1024
-	}
-
-	// 保留的日志文件个数
-	rw.maxFileNo = maxFileNumber
-
 	return nil
 }
 
-func (rw *RotateLogWriteSyncer)isNeedRotate(strLen int64) bool {
+func (rw *RotateLogWriteSyncer) isNeedRotate(strLen int64) bool {
 	// 时间判断
-	if time.Now().Unix() >= rw.nextRotateTime {
+	if time.Now().Unix() > rw.nextRotateTime {
 		rw.nextRotateTime = getNextRotateTime()
 		return true
 	}
@@ -188,18 +196,19 @@ func getRotateFileNameList(filePath string, maxFileNo int, dateStr string) (rota
 			continue
 		}
 
-		if strings.HasPrefix(file.Name(), base + "." + dateStr) {
+		if strings.HasPrefix(file.Name(), base+"."+dateStr) {
 			no, err := strconv.Atoi(filepath.Ext(file.Name())[1:])
 			if err != nil {
 				continue
 			}
 
-			if no >= (maxFileNo - 1) {
+			// maxFileno数减去当前正在写的日志文件数1，编号从000开始，需要再减1
+			if no >= (maxFileNo - 2) {
 				// 文件后缀超过最大编号，删除该文件
-				deleteFileList = append(deleteFileList, dir + "/" + file.Name())
+				deleteFileList = append(deleteFileList, dir+"/"+file.Name())
 			} else {
 				extNos = append(extNos, no)
-				rotateFileList = append(rotateFileList, dir + "/" + file.Name())
+				rotateFileList = append(rotateFileList, dir+"/"+file.Name())
 			}
 		}
 	}
@@ -220,24 +229,23 @@ func doLogRotate(filePath string, maxFileNo int, dateStr string) {
 	if (len(extNos) > 0) && (len(rotateFileList) > 0) {
 		sort.Ints(extNos)
 		for idx := len(extNos); idx > 0; idx-- {
-			tmp := rotateFileList[idx - 1][:len(rotateFileList[idx - 1]) - 3]
-			dstFileName := tmp + fmt.Sprintf("%03d", extNos[idx - 1] + 1)
-			os.Rename(rotateFileList[idx - 1], dstFileName )
+			dstFileName := rotateFileList[idx-1][:len(rotateFileList[idx-1])-3] + fmt.Sprintf("%03d", extNos[idx-1]+1)
+			os.Rename(rotateFileList[idx-1], dstFileName)
 		}
 	}
 
 	// 最后将tmp文件改名为000
-	os.Rename(filePath + ".tmp", filePath + "." + dateStr + ".000")
+	os.Rename(filePath+".tmp", filePath+"."+dateStr+".000")
 }
 
-func (rw *RotateLogWriteSyncer) Write (p []byte) (n int, err error) {
+func (rw *RotateLogWriteSyncer) Write(p []byte) (n int, err error) {
 	// 判断时间，文件大小条件，是否需要切换日志,如果需要切换日志，执行日志切换动作
 	if rw.isNeedRotate(int64(len(p))) {
 		// 切换日志
 		// 先将当前文件重命名，新建日志文件
 		rw.logWriter.Flush()
 		rw.logFile.Close()
-		os.Rename(rw.filePath, rw.filePath + ".tmp")
+		os.Rename(rw.filePath, rw.filePath+".tmp")
 
 		rw.logFile, rw.logWriter = nil, nil
 		rw.logFile, rw.logWriter, err = createLogWriter(rw.filePath)
