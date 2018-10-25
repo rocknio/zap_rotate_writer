@@ -106,6 +106,8 @@ func getLogWriter(filePath string) (*os.File, *bufio.Writer, error) {
 func (rw *RotateLogWriteSyncer) RotateLoggerInit(when string, rotateSize int64, logFileName string, maxFileNumberPerDay int) error {
 	if when != "MIDNIGHT" {
 		return errors.New("currently only supports 'MIDNIGHT'")
+	} else {
+		rw.when = when
 	}
 
 	if logFileName == "" {
